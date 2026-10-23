@@ -1,0 +1,102 @@
+name: 'Ring Partner API Sandbox'
+description: 'Start an unofficial local mock of the Ring Partner API + HMAC-signed webhook simulator for integration tests.'
+author: 'saurabh4269'
+branding:
+  icon: 'bell'
+  color: 'blue'
+
+inputs:
+  port:
+    description: 'Port to listen on (bound to 127.0.0.1).'
+    required: false
+    default: '8686'
+  token:
+    description: 'Bearer token the sandbox accepts.'
+    required: false
+    default: 'sandbox-token'
+  webhook-url:
+    description: 'Where fired events are POSTed (e.g. http://localhost:3000/webhooks/ring). Empty = record in history only.'
+    required: false
+    default: ''
+  signing-key:
+    description: 'HMAC key used for the X-Signature header.'
+    required: false
+    default: 'sandbox-signing-key'
+  scenario:
+    description: 'Scenario JSON file (relative to the workspace) to play on startup.'
+    required: false
+    default: ''
+  speed:
+    description: 'Scenario playback speed multiplier.'
+    required: false
+    default: '1'
+  devices:
+    description: 'Number of simulated devices.'
+    required: false
+    default: '1'
+  fixtures:
+    description: 'Directory of recorded fixtures (from `ring-sandbox record`) to replay.'
+    required: false
+    default: ''
+  waf:
+    description: 'Require User-Agent and Hardware_Id headers (406 otherwise). Set to "false" to disable.'
+    required: false
+    default: 'true'
+  timeout:
+    description: 'Seconds to wait for the sandbox to become ready.'
+    required: false
+    default: '15'
+
+outputs:
+  base-url:
+    description: 'Base URL of the running sandbox, e.g. http://127.0.0.1:8686'
+    value: ${{ steps.start.outputs.base-url }}
+  token:
+    description: 'Bearer token to use against the sandbox.'
+    value: ${{ steps.start.outputs.token }}
+  log-file:
+    description: 'Path of the sandbox log (webhook deliveries, requests).'
+    value: ${{ steps.start.outputs.log-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: start
+      shell: bash
+      env:
+        RS_BIN: ${{ github.action_path }}/bin/ring-sandbox.js
+        RS_PORT: ${{ inputs.port }}
+        RS_TOKEN: ${{ inputs.token }}
+        RS_WEBHOOK_URL: ${{ inputs.webhook-url }}
+        RS_SIGNING_KEY: ${{ inputs.signing-key }}
+        RS_SCENARIO: ${{ inputs.scenario }}
+        RS_SPEED: ${{ inputs.speed }}
+        RS_DEVICES: ${{ inputs.devices }}
+        RS_FIXTURES: ${{ inputs.fixtures }}
+        RS_WAF: ${{ inputs.waf }}
+        RS_TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -euo pipefail
+        command -v node >/dev/null || { echo "::error::Node.js >= 20 is required (add actions/setup-node first)"; exit 1; }
+        args=(serve --host 127.0.0.1 --port "$RS_PORT" --token "$RS_TOKEN" --signing-key "$RS_SIGNING_KEY" --devices "$RS_DEVICES" --speed "$RS_SPEED")
+        [ -n "$RS_WEBHOOK_URL" ] && args+=(--webhook-url "$RS_WEBHOOK_URL")
+        [ -n "$RS_SCENARIO" ] && args+=(--scenario "$RS_SCENARIO")
+        [ -n "$RS_FIXTURES" ] && args+=(--fixtures "$RS_FIXTURES")
+        [ "$RS_WAF" = "false" ] && args+=(--no-waf)
+        log="${RUNNER_TEMP:-/tmp}/ring-sandbox-$RS_PORT.log"
+        nohup node "$RS_BIN" "${args[@]}" >"$log" 2>&1 &
+        echo "RING_SANDBOX_PID=$!" >> "$GITHUB_ENV"
+        base="http://127.0.0.1:$RS_PORT"
+        for _ in $(seq 1 $((RS_TIMEOUT * 5))); do
+          if node -e "fetch(process.argv[1]).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))" "$base/"; then
+            cat "$log"
+            echo "base-url=$base" >> "$GITHUB_OUTPUT"
+            echo "token=$RS_TOKEN" >> "$GITHUB_OUTPUT"
+            echo "log-file=$log" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sleep 0.2
+        done
+        echo "::error::ring-partner-sandbox did not become ready on $base"
+        cat "$log"
+        exit 1

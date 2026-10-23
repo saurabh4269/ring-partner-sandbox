@@ -151,6 +151,46 @@ RING_API_BASE=http://localhost:8686 RING_ACCESS_TOKEN=sandbox-token npm start
 - Replay matching: exact method + path + query first (volatile params like `security_token`, `req_id`, `X-Amz-Date` are ignored), then method + path. Anything unmatched falls back to the built-in mock. Auth and WAF checks still apply in front of fixtures. Replayed responses carry an `X-Sandbox-Fixture` header naming the file, and `/_sandbox/state` reports the fixture count.
 - Programmatic use: `createRecorder({ upstream, out, redact })` and `createSandbox({ fixtures: 'fixtures/' })` from `ring-partner-sandbox`. `RING_UPSTREAM` sets the default `--upstream`.
 
+## GitHub Action
+
+The repo is also a composite GitHub Action that starts the sandbox in the background, waits until it answers, and exposes its URL. Use it to run your Ring integration tests in CI with no secrets:
+
+```yaml
+# .github/workflows/ring-integration.yml (in your repo)
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - id: ring
+        uses: saurabh4269/ring-partner-sandbox@v0.2.0
+        with:
+          webhook-url: http://127.0.0.1:3000/webhooks/ring   # optional
+          signing-key: test-signing-key
+          scenario: test/ring-scenario.json                  # optional
+      - run: npm test
+        env:
+          RING_API_BASE: ${{ steps.ring.outputs.base-url }}
+          RING_ACCESS_TOKEN: ${{ steps.ring.outputs.token }}
+          RING_WEBHOOK_SECRET: test-signing-key
+```
+
+| Input | Default | |
+|---|---|---|
+| `port` | `8686` | Bound to `127.0.0.1` |
+| `token` | `sandbox-token` | Accepted bearer token |
+| `webhook-url` | none | Where fired events are delivered |
+| `signing-key` | `sandbox-signing-key` | HMAC key for `X-Signature` |
+| `scenario` / `speed` | none / `1` | Scenario to play on startup |
+| `devices` | `1` | Number of simulated devices |
+| `fixtures` | none | Directory of recorded fixtures to replay |
+| `waf` | `true` | `false` disables the `User-Agent`/`Hardware_Id` 406 check |
+| `timeout` | `15` | Seconds to wait for readiness |
+
+Outputs: `base-url`, `token`, `log-file`. The server PID is exported as `$RING_SANDBOX_PID`. A complete workflow is in [`examples/github-actions/ci.yml`](examples/github-actions/ci.yml).
+
 ## Verifying webhooks in your app
 
 ```js

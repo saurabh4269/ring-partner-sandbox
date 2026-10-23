@@ -1,0 +1,41 @@
+# Example: copy to .github/workflows/ring-integration.yml in YOUR repo.
+# Runs your Ring integration tests against ring-partner-sandbox instead of the real API.
+name: ring-integration
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Start your webhook receiver first if you want deliveries (example: port 3000).
+      # - run: npm start &
+
+      - name: Start Ring Partner API sandbox
+        id: ring
+        uses: saurabh4269/ring-partner-sandbox@v0.2.0
+        with:
+          port: 8686
+          token: sandbox-token
+          webhook-url: http://127.0.0.1:3000/webhooks/ring
+          signing-key: test-signing-key
+          # scenario: test/ring-scenario.json   # optional: timed events on startup
+          # fixtures: test/fixtures             # optional: replay a recorded Playground session
+
+      - name: Integration tests
+        run: npm test
+        env:
+          RING_API_BASE: ${{ steps.ring.outputs.base-url }}
+          RING_ACCESS_TOKEN: ${{ steps.ring.outputs.token }}
+          RING_WEBHOOK_SECRET: test-signing-key
+
+      - name: Fire a webhook mid-test (optional)
+        run: npx --yes github:saurabh4269/ring-partner-sandbox fire motion_detected --sub-type human --via ${{ steps.ring.outputs.base-url }}
+
+      - name: Sandbox log
+        if: always()
+        run: cat "${{ steps.ring.outputs.log-file }}"
