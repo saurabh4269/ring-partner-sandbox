@@ -2,29 +2,34 @@
 
 A local, zero-dependency stand-in for the **Ring Partner API** (`https://api.amazonvision.com`, JSON:API) with a **signed webhook simulator** and a **record/replay proxy**. Build and test a Ring integration without waiting on a 30-minute Playground token: develop against realistic mock data, fire every documented webhook at your handler with a valid `X-Signature`, capture a real Playground session once and replay it forever, and run all of it in CI with a one-line GitHub Action.
 
-> **Unofficial.** This project is not affiliated with, endorsed by or supported by Ring LLC or Amazon. Endpoint shapes are derived from the public [Ring Partner API documentation](https://developer.amazon.com/docs/ring/api-documentation.html). The real API can differ from this mock. Before you ship, test against the real service.
+> **Unofficial. Not affiliated with, endorsed by or supported by Ring LLC or Amazon.** Endpoint shapes are derived from the public [Ring Partner API documentation](https://developer.amazon.com/docs/ring/api-documentation.html). The real API can differ from this mock. Before you ship, test against the real service.
 
 ## Features
 
 - **Mock API** for users, devices (with JSON:API `include`), status, capabilities, configurations, location, event history with filters and pagination, and the snapshot `POST` → `303` → signed download flow. It enforces the same rules as Ring (Bearer 401, `User-Agent`/`Hardware_Id` 406, documented error envelopes), so mistakes surface locally.
 - **Webhook simulator** for all 10 documented v1.1 event types, HMAC-SHA256 signed exactly as documented. Fire them one at a time or as timed scenarios. Events also land in mock history and change device state.
 - **Record / replay**: a transparent proxy that saves real API responses (and snapshot images) as redacted fixtures, then `serve --fixtures` replays them. [Details](#record-and-replay-real-responses)
-- **GitHub Action**: `uses: saurabh4269/ring-partner-sandbox@v0.2.0` gives your CI a running sandbox and its `base-url`. [Details](#github-action)
+- **GitHub Action**: `uses: saurabh4269/ring-partner-sandbox@v0.2.1` gives your CI a running sandbox and its `base-url`. [Details](#github-action)
 - **Verifiers** for JS (`verifySignature`, node:http/Express middleware with idempotency) and Python (stdlib only).
 - **Runnable examples** for a Node client and Node/Python webhook receivers, all covered by the test suite.
 - Node.js 20 or newer, ESM, no runtime dependencies, nothing to install.
 
 ## 60-second quick start
 
+Needs Node.js 20 or newer and nothing else: there is no `npm install` step, because there are no dependencies.
+
 ```bash
 git clone https://github.com/saurabh4269/ring-partner-sandbox && cd ring-partner-sandbox
+npm test                                                                      # 33 tests, about 1 second
 node examples/webhook-receiver.mjs &                                          # a signed-webhook receiver on :3000
 node bin/ring-sandbox.js serve --webhook-url http://localhost:3000/webhooks/ring &   # the mock API on :8686
+sleep 1
 node examples/node-client.mjs                                                 # devices, history, snapshot.jpg
 node bin/ring-sandbox.js play scenarios/porch-delivery.json --via http://localhost:8686 --speed 10
+kill %1 %2                                                                    # stop both background servers
 ```
 
-The client prints your devices and recent events and saves `snapshot.jpg`. The receiver logs each verified event as the scenario plays (vehicle, person, doorbell press).
+The client prints your devices and recent events and saves `snapshot.jpg`. The receiver logs each verified event as the scenario plays (vehicle, person, doorbell press). The [curl walkthrough](#quick-start-with-curl) below shows the raw HTTP.
 
 ## Why
 
@@ -43,7 +48,7 @@ The Ring Developer Playground is the official way to try the Partner API, but it
 node bin/ring-sandbox.js serve --webhook-url http://localhost:3000/webhooks/ring
 ```
 
-In another terminal:
+In another terminal (bash or zsh; the receiver from the quick start is optional, without it webhook deliveries are just logged as failed):
 
 ```bash
 H=(-H 'User-Agent: MyApp/1.0' -H 'Hardware_Id: 550e8400-e29b-41d4-a716-446655440000' -H 'Authorization: Bearer sandbox-token')
@@ -180,7 +185,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
       - id: ring
-        uses: saurabh4269/ring-partner-sandbox@v0.2.0
+        uses: saurabh4269/ring-partner-sandbox@v0.2.1
         with:
           webhook-url: http://127.0.0.1:3000/webhooks/ring   # optional
           signing-key: test-signing-key
@@ -248,33 +253,66 @@ app.post('/webhooks/ring', ringWebhookMiddleware(process.env.RING_WEBHOOK_SECRET
 
 With Express, don't put `express.json()` in front of this route, because it consumes the body. If you need a body parser there, use `express.raw({ type: '*/*' })`; the middleware reuses the Buffer. For Python, [`python/verify.py`](python/verify.py) provides `verify_signature(key, raw_bytes, header)` and `first_delivery(request_id)`, built on `hmac.compare_digest`.
 
-## Fidelity
+## API coverage
 
-| Area | Status |
-|---|---|
-| `GET /v1/users/me` | Matches the documented shape |
-| `GET /v1/devices` with `?include=status,capabilities,configurations,location` | Matches the documented shape: JSON:API compound document, `relationships` with `data` and `links.related`, top-level `included`, and `meta.time` |
-| `/v1/devices/{id}` and its `/status`, `/capabilities`, `/configurations`, `/location` | Matches the documented shape. Values are fixed and DoorbellPro-like (1080p AVC, motion zones, `e2e_encryption.enabled: false`). |
-| `GET /v1/history/devices/{id}/events` | Matches: newest first, `event_types` filter including composite values like `motion.human`, and `links.next` with `page[key]`. Approximated: 20 events per page. Viewing a snapshot of an event sets its `is_third_party_reviewed` to true. |
-| Snapshot `POST …/media/image/download` → `303` → `GET /v1/download?security_token=…&req_type=image_download&req_id=…` | Matches the flow, the `X-Media-Timestamp`/`X-Media-Origin`/`X-Request-ID` headers, the `at_timestamp`/`latest_in_range` validation (180 days, 24-hour window) and JPEG/PNG output. Approximated: the image is a placeholder (or your `--snapshot` file), download links expire after 60 seconds, and `components` is ignored. |
-| Auth | `Bearer` required, otherwise 401 `UNAUTHORIZED`. Approximated: one static token with no expiry. |
-| WAF | 406 if `User-Agent` or `Hardware_Id` is missing (`--no-waf` turns this off). The 406 for datacenter IP addresses isn't simulated. |
-| Errors | Documented envelope: `{"errors":[{"id","status","code","detail","source":{"pointer"},"meta":{"timestamp"}}]}`, with codes such as `INVALID_PAYLOAD`, `UNAUTHORIZED`, `REQUEST_FORBIDDEN`, `DEVICE_NOT_FOUND` and `MEDIA_NOT_FOUND` |
-| Webhooks v1.1 | Matches: `meta.version`/`time`/`request_id`/`account_id`, per-type `data` shapes (device, `users`-sourced app integration, and subscription events with `source_id`/`plan_id`/`expires_at`), and the `X-Signature` HMAC-SHA256 over the raw body. Non-standard: `meta.simulated: true` (`--no-sim-flag` removes it). `timestamp_readable` is in UTC. |
-| Webhook retries and backoff (1s, 5s, 30s, …) and the 5-second timeout | Partial: one attempt with a 5-second timeout, and the result is recorded in `/_sandbox/state`. No retries. |
-| Record / replay | Recorded responses are byte-for-byte JSON from the real API (after redaction). Approximated: matching ignores request bodies, so two different `POST` bodies to one path share a fixture (the last one recorded wins); replayed snapshot links are issued by the sandbox. |
-| **Not mocked** | WHEP live streaming and video clip download (both return 501 `NOT_IMPLEMENTED`), OAuth (`oauth.ring.com` token exchange and refresh), account linking and `app-integrations`, the Subscriptions query API, chimes and other non-camera devices, multi-camera `components`, rate limiting |
+Every endpoint in the [Ring Partner API reference](https://developer.amazon.com/docs/ring/api-documentation.html) and how closely the sandbox follows it. **Full**: request validation, response shape and status codes follow the docs. **Approximate**: the flow and shape match, with the simplifications listed. **Not mocked**: returns the status shown so your code fails loudly instead of silently.
 
-Found a mismatch with the docs or the real API? Please open an issue with the docs section or a redacted real response.
+| Method | Path | Fidelity | Notes |
+|---|---|---|---|
+| `GET` | `/v1/users/me` | Full | Fixed account `ava1.ring.account.SANDBOX0001` |
+| `GET` | `/v1/devices` | Full | JSON:API compound document; `?include=status,capabilities,configurations,location` adds top-level `included`; `relationships` with `data` and `links.related`; `meta.time`. Unknown `include` gets 400 `INVALID_PAYLOAD`. |
+| `GET` | `/v1/devices/{device_id}` | Full | 404 `DEVICE_NOT_FOUND` for unknown or removed devices |
+| `GET` | `/v1/devices/{device_id}/status` | Approximate | Documented shape; `online` follows `device_online`/`device_offline` events, other values are fixed |
+| `GET` | `/v1/devices/{device_id}/capabilities` | Approximate | Documented shape with fixed DoorbellPro-like values (1080p AVC, motion zones) |
+| `GET` | `/v1/devices/{device_id}/configurations` | Approximate | Documented shape with fixed values (`e2e_encryption.enabled: false`) |
+| `GET` | `/v1/devices/{device_id}/location` | Approximate | Documented shape with fixed values |
+| `GET` | `/v1/history/devices/{device_id}/events` | Approximate | Newest first, `event_types` filter including composite values like `motion.human`, `links.next` with `page[key]`. Page size fixed at 20. Viewing an event's snapshot sets `is_third_party_reviewed`. |
+| `POST` | `/v1/devices/{device_id}/media/image/download` | Approximate | `303` with `Location`, `X-Media-Timestamp`/`X-Media-Origin`/`X-Request-ID`; validates `at_timestamp`/`latest_in_range` (180 days, 24-hour window). The image is a placeholder or your `--snapshot` file; `components` is ignored. |
+| `GET` | `/v1/download?security_token=…&req_type=image_download&req_id=…` | Approximate | Signed link, no bearer needed, JPEG or PNG. Links expire after 60 seconds. |
+| `POST` | `/v1/devices/{device_id}/media/video/download` | Not mocked | 501 `NOT_IMPLEMENTED` |
+| `POST`/`DELETE` | `/v1/devices/{device_id}/media/streaming/whep/sessions[/{session_id}]` | Not mocked | 501 `NOT_IMPLEMENTED` (WHEP live video) |
+| — | `rtsps://video.rtsp.amazonvision.com:322/v1/devices/{device_id}/stream` | Not mocked | RTSPS live video is out of scope |
+| `POST` | `/v1/devices/{device_id}/media/audio/playback` | Not mocked | 404 `NOT_FOUND` (chime audio) |
+| `POST`/`PATCH`/`DELETE` | `/v1/accounts/me/app-integrations` | Not mocked | 404 `NOT_FOUND` (account linking) |
+| `GET` | `/v1/accounts/me/subscriptions` | Not mocked | 404 `NOT_FOUND` (Subscriptions query API) |
+| `POST` | `https://oauth.ring.com/oauth/token` | Not mocked | Use the fixed sandbox bearer token instead |
+| Webhooks | all 10 v1.1 event types | Full | `meta.version`/`time`/`request_id`/`account_id`, per-type `data` shapes, `X-Signature` HMAC-SHA256 over the raw body. Non-standard `meta.simulated: true` (`--no-sim-flag` removes it); `timestamp_readable` is UTC. |
+| Webhooks | retries with backoff, 5-second timeout | Approximate | One attempt with a 5-second timeout, result visible in `/_sandbox/state`. No retries. |
+
+Cross-cutting behaviour:
+
+| Area | Fidelity | Notes |
+|---|---|---|
+| Auth | Approximate | `Authorization: Bearer` required, otherwise 401 `UNAUTHORIZED`. One static token with no expiry. |
+| WAF headers | Full | 406 if `User-Agent` or `Hardware_Id` is missing (`--no-waf` turns this off). The 406 for datacenter IP addresses isn't simulated. |
+| Error envelope | Full | `{"errors":[{"id","status","code","detail","source":{"pointer"},"meta":{"timestamp"}}]}` with codes such as `INVALID_PAYLOAD`, `UNAUTHORIZED`, `REQUEST_FORBIDDEN`, `DEVICE_NOT_FOUND`, `MEDIA_NOT_FOUND` |
+| Rate limiting | Not mocked | No 429s |
+| Sensors, chimes, multi-camera `components` | Not mocked | Only cameras and doorbells are simulated |
+| Record / replay | Approximate | Replayed JSON is byte-for-byte what the real API returned (after redaction). Matching ignores request bodies, so two different `POST` bodies to one path share a fixture (the last one recorded wins). Replayed snapshot links are issued by the sandbox. |
+
+Found a mismatch with the docs or the real API? Please open an issue with the docs section or a redacted real response. [CONTRIBUTING.md](CONTRIBUTING.md#how-fidelity-is-checked) explains how fidelity is checked.
+
+## Tests
+
+```bash
+npm test     # node --test: 33 tests, no dependencies, about 1 second
+```
+
+The tests start real servers on random ports and make no calls to Ring. They cover the mock API (auth, WAF, includes, history filters and paging, the snapshot 303 flow, error envelopes), every webhook payload and its signature, the JS and Python verifiers (the Python one is skipped if `python3` is missing), record/replay (using the sandbox itself as a fake upstream for the recorder), the composite action's start script, and each file in `examples/`.
+
+## CI
+
+The workflow is in [`ci/ci.yml`](ci/ci.yml): `npm test` on Node 20 and 22, plus a job that starts the sandbox with this repo's own composite action (`uses: ./`), checks `GET /v1/devices` and the 401 path, and fires a signed webhook. It lives in `ci/` rather than `.github/workflows/` because the token used to publish the repo can't push workflow files. To turn it on:
+
+```bash
+gh auth refresh -h github.com -s workflow   # once: grant the workflow scope
+scripts/enable-ci.sh                        # copies ci/ci.yml to .github/workflows/ci.yml, commits, pushes
+```
 
 ## Development
 
-```bash
-npm test     # node --test, no dependencies
-```
-
-The code is in `src/`: `server.js` (mock API), `fixtures.js` (record proxy and replay), `events.js` (payload builders), `verify.js` (signatures, middleware, idempotency), `deliver.js`, `scenario.js` and `image.js`. The tests start real servers on random ports (including the sandbox as a fake upstream for the recorder), so no real Ring calls are made. See [CHANGELOG.md](CHANGELOG.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The code is in `src/`: `server.js` (mock API), `fixtures.js` (record proxy and replay), `events.js` (payload builders), `verify.js` (signatures, middleware, idempotency), `deliver.js`, `scenario.js` and `image.js`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add an endpoint, and [CHANGELOG.md](CHANGELOG.md) for releases.
 
 ## License and disclaimer
 
-This is an unofficial community project, not affiliated with, endorsed by or supported by Ring LLC or Amazon. MIT. See [LICENSE](LICENSE). Ring and Amazon are trademarks of their respective owners. They're mentioned here only to describe compatibility.
+Unofficial. Not affiliated with, endorsed by or supported by Ring LLC or Amazon. This is a community project, released under the MIT license. See [LICENSE](LICENSE). Ring and Amazon are trademarks of their respective owners. They're mentioned here only to describe compatibility.
