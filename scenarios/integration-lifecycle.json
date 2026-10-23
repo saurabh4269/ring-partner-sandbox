@@ -1,0 +1,11 @@
+[
+  { "at": 0, "type": "app_integration_added", "note": "user links your app" },
+  { "at": 2, "type": "device_added", "note": "user shares a camera" },
+  { "at": 4, "type": "subscription_activated", "sub_type": "trial" },
+  { "at": 10, "type": "device_offline", "note": "Wi-Fi drops" },
+  { "at": 25, "type": "device_online" },
+  { "at": 30, "type": "motion_detected", "sub_type": "human" },
+  { "at": 40, "type": "subscription_deactivated", "sub_type": "trial" },
+  { "at": 45, "type": "device_removed" },
+  { "at": 50, "type": "app_integration_removed", "note": "user unlinks; tokens are revoked" }
+]

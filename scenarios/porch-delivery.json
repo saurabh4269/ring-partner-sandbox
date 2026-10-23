@@ -1,0 +1,7 @@
+[
+  { "at": 0, "type": "motion_detected", "sub_type": "vehicle", "note": "delivery van pulls up" },
+  { "at": 20, "type": "motion_detected", "sub_type": "human", "note": "courier walks to the door" },
+  { "at": 28, "type": "button_press", "note": "courier rings the bell" },
+  { "at": 45, "type": "motion_detected", "sub_type": "human", "note": "courier leaves" },
+  { "at": 70, "type": "motion_detected", "sub_type": "other_motion", "note": "leaves blowing" }
+]

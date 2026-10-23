@@ -1,0 +1,23 @@
+{
+  "name": "ring-partner-sandbox",
+  "version": "0.1.0",
+  "description": "Unofficial local mock of the Ring Partner API (api.amazonvision.com, JSON:API) plus an HMAC-signed webhook simulator.",
+  "type": "module",
+  "bin": { "ring-sandbox": "bin/ring-sandbox.js" },
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./verify": "./src/verify.js",
+    "./server": "./src/server.js",
+    "./events": "./src/events.js"
+  },
+  "files": ["bin", "src", "scenarios", "python", "README.md", "LICENSE"],
+  "scripts": {
+    "start": "node bin/ring-sandbox.js serve",
+    "test": "node --test test/"
+  },
+  "engines": { "node": ">=20" },
+  "keywords": ["ring", "amazon", "ring-partner-api", "webhook", "hmac", "mock", "sandbox", "json-api"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/saurabh4269/ring-partner-sandbox.git" }
+}
