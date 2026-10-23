@@ -1,4 +1,5 @@
 """Verify a Ring webhook (v1.1) X-Signature header. Standard library only."""
+from __future__ import annotations
 import hashlib
 import hmac
 
