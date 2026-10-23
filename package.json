@@ -1,23 +1,63 @@
 {
   "name": "ring-partner-sandbox",
-  "version": "0.1.0",
-  "description": "Unofficial local mock of the Ring Partner API (api.amazonvision.com, JSON:API) plus an HMAC-signed webhook simulator.",
+  "version": "0.2.0",
+  "description": "Unofficial local mock of the Ring Partner API (api.amazonvision.com, JSON:API), HMAC-signed webhook simulator, and record/replay proxy for real API sessions. Zero dependencies.",
   "type": "module",
-  "bin": { "ring-sandbox": "bin/ring-sandbox.js" },
+  "bin": {
+    "ring-sandbox": "bin/ring-sandbox.js"
+  },
   "main": "./src/index.js",
   "exports": {
     ".": "./src/index.js",
     "./verify": "./src/verify.js",
     "./server": "./src/server.js",
-    "./events": "./src/events.js"
+    "./events": "./src/events.js",
+    "./fixtures": "./src/fixtures.js",
+    "./package.json": "./package.json"
   },
-  "files": ["bin", "src", "scenarios", "python", "README.md", "LICENSE"],
+  "files": [
+    "bin",
+    "src",
+    "scenarios",
+    "python/verify.py",
+    "examples",
+    "action.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "node bin/ring-sandbox.js serve",
     "test": "node --test"
   },
-  "engines": { "node": ">=20" },
-  "keywords": ["ring", "amazon", "ring-partner-api", "webhook", "hmac", "mock", "sandbox", "json-api"],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "ring",
+    "amazon",
+    "ring-partner-api",
+    "webhook",
+    "hmac",
+    "mock",
+    "sandbox",
+    "json-api",
+    "record-replay",
+    "fixtures",
+    "proxy",
+    "github-action",
+    "testing",
+    "iot",
+    "doorbell"
+  ],
+  "author": "Saurabh Gupta (https://github.com/saurabh4269)",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/saurabh4269/ring-partner-sandbox.git" }
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saurabh4269/ring-partner-sandbox.git"
+  },
+  "bugs": {
+    "url": "https://github.com/saurabh4269/ring-partner-sandbox/issues"
+  },
+  "homepage": "https://github.com/saurabh4269/ring-partner-sandbox#readme"
 }
