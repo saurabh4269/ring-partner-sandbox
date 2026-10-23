@@ -14,7 +14,7 @@
   "files": ["bin", "src", "scenarios", "python", "README.md", "LICENSE"],
   "scripts": {
     "start": "node bin/ring-sandbox.js serve",
-    "test": "node --test test/"
+    "test": "node --test"
   },
   "engines": { "node": ">=20" },
   "keywords": ["ring", "amazon", "ring-partner-api", "webhook", "hmac", "mock", "sandbox", "json-api"],

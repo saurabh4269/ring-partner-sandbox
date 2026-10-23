@@ -10,6 +10,7 @@ export const MOTION_SUB_TYPES = ['human', 'vehicle', 'motion', 'other_motion', '
 export const DEFAULT_ACCOUNT_ID = 'ava1.ring.account.SANDBOX0001';
 export const DEFAULT_DEVICE_ID = 'ava1.ring.device.SANDBOX0001';
 
+// Ring renders this in an unspecified local zone; the sandbox uses UTC.
 function readable(ms) {
   return new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
 }
