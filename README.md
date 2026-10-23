@@ -76,7 +76,7 @@ Make your Ring API base URL configurable, then set it to the sandbox:
 RING_API_BASE=http://localhost:8686 RING_ACCESS_TOKEN=sandbox-token npm start
 ```
 
-For example, [DropZone+](https://github.com/saurabh4269/dropzone-plus) reads `RING_API_BASE`, and its probe script runs end to end against the sandbox:
+For example, [DropZone](https://github.com/saurabh4269/dropzone-plus) reads `RING_API_BASE`, and its probe script runs end to end against the sandbox:
 
 ```
 $ RING_API_BASE=http://localhost:8686 RING_ACCESS_TOKEN=sandbox-token node scripts/ring-probe.js
@@ -222,9 +222,9 @@ Outputs: `base-url`, `token`, `log-file`. The server PID is exported as `$RING_S
 
 `npm test` runs each example against a live sandbox, so they stay working.
 
-## Use with DropZone+
+## Use with DropZone
 
-[DropZone+](https://github.com/saurabh4269/dropzone-plus) is a Ring integration that reads `RING_API_BASE`, so it runs end to end against the sandbox:
+[DropZone](https://github.com/saurabh4269/dropzone-plus) is a Ring integration that reads `RING_API_BASE`, so it runs end to end against the sandbox:
 
 ```bash
 # terminal 1
