@@ -1,0 +1,65 @@
+# CI for ring-partner-sandbox.
+# Lives in ci/ because the publishing token could not push .github/workflows/.
+# Enable it with scripts/enable-ci.sh (copies this file to .github/workflows/ci.yml).
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: npm test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/setup-python@v5   # test/python.test.js runs python/verify.py
+        with:
+          python-version: '3.x'
+      - run: node --version && npm --version
+      - run: npm test
+
+  action:
+    name: composite action smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Start the sandbox with this repo's own action
+        id: ring
+        uses: ./
+        with:
+          port: 8686
+          token: ci-token
+          devices: 2
+      - name: GET /v1/devices
+        run: |
+          set -euo pipefail
+          body=$(curl -sf \
+            -H 'User-Agent: ring-partner-sandbox-ci/1.0' \
+            -H 'Hardware_Id: 550e8400-e29b-41d4-a716-446655440000' \
+            -H "Authorization: Bearer ${{ steps.ring.outputs.token }}" \
+            "${{ steps.ring.outputs.base-url }}/v1/devices")
+          echo "$body"
+          echo "$body" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const n=JSON.parse(s).data.length;console.log("devices:",n);process.exit(n===2?0:1)})'
+      - name: Missing bearer gets 401
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H 'User-Agent: ci' -H 'Hardware_Id: x' "${{ steps.ring.outputs.base-url }}/v1/devices")
+          echo "status $code"; test "$code" = 401
+      - name: Fire a signed webhook through the running sandbox
+        run: node bin/ring-sandbox.js fire motion_detected --sub-type human --via "${{ steps.ring.outputs.base-url }}"
+      - name: Sandbox log
+        if: always()
+        run: cat "${{ steps.ring.outputs.log-file }}"
