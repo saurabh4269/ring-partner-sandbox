@@ -87,6 +87,7 @@ Snapshot download URLs are absolute and point back to the sandbox host. Like Rin
 | `--scenario file.json` / `--speed` | none / `1` | Play a scenario on startup, recording each event to history and sending its webhook |
 | `--no-waf` | WAF on | Stop requiring `User-Agent` and `Hardware_Id` (by default, a missing header gets a 406) |
 | `--no-sim-flag` | flag on | Leave out the non-standard `meta.simulated: true` |
+| `--fixtures dir/` | none | Serve recorded responses (see [Record and replay](#record-and-replay-real-responses)) before falling back to the mock |
 | `--no-seed` | seeded | Start with empty history (by default, each device gets 5 events from the last hour) |
 
 ### `fire <type>`
@@ -125,6 +126,30 @@ These aren't part of the Ring API. They take no auth, so keep the sandbox on loc
 - `POST /_sandbox/reset` (`?seed=false` to start empty)
 
 Events also update mock state. `device_offline` and `device_online` toggle `status.online`, `device_removed` hides the device (a later request for it gets a 404), and `device_added` restores or creates it. `motion_detected` adds a `motion` history event and `button_press` adds a `ding`.
+
+## Record and replay real responses
+
+Playground tokens last about 30 minutes. Spend them recording, then develop against the recording forever:
+
+```bash
+# 1. Start a recording proxy in front of the real API
+npx ring-sandbox record --upstream https://api.amazonvision.com --port 8687 --out fixtures/
+
+# 2. Point your app (or curl) at the proxy with your real Playground token and click around
+RING_API_BASE=http://localhost:8687 RING_ACCESS_TOKEN=<playground token> npm start
+
+# 3. Later, offline, with the never-expiring sandbox token
+npx ring-sandbox serve --fixtures fixtures/
+RING_API_BASE=http://localhost:8686 RING_ACCESS_TOKEN=sandbox-token npm start
+```
+
+- The proxy forwards your `Authorization`, `User-Agent` and `Hardware_Id` headers and returns upstream responses unchanged.
+- Snapshot redirects are routed back through the proxy so the image is captured: the `POST …/media/image/download` fixture stores the `303` plus the image file next to it. On replay the sandbox issues its own 303 and serves the recorded bytes.
+- Each response becomes one readable file, `METHOD_path[__queryhash].json`, containing `request` (method, path, canonical query, JSON body) and `response` (status, content headers, body). Edit them by hand to craft edge cases.
+- **Redaction.** The `Authorization` header is never written to disk. Bearer tokens seen on the wire and signed-URL credentials (`security_token`, `X-Amz-Signature`, …) are always replaced with `REDACTED`. By default (`--redact`) Ring account ids become stable placeholders (`ava1.ring.account.REDACTED0001`) and e-mail addresses are masked; `--no-redact` keeps them. Review fixtures before committing them anyway.
+- 401, 403, 406, 429 and 5xx responses are not saved (they describe your session, not your data). 404s and other 4xx are.
+- Replay matching: exact method + path + query first (volatile params like `security_token`, `req_id`, `X-Amz-Date` are ignored), then method + path. Anything unmatched falls back to the built-in mock. Auth and WAF checks still apply in front of fixtures. Replayed responses carry an `X-Sandbox-Fixture` header naming the file, and `/_sandbox/state` reports the fixture count.
+- Programmatic use: `createRecorder({ upstream, out, redact })` and `createSandbox({ fixtures: 'fixtures/' })` from `ring-partner-sandbox`. `RING_UPSTREAM` sets the default `--upstream`.
 
 ## Verifying webhooks in your app
 

@@ -3,3 +3,4 @@ export { verifySignature, sign, idempotency, ringWebhookMiddleware, readRawBody 
 export { buildEvent, EVENT_TYPES, DEFAULT_ACCOUNT_ID, DEFAULT_DEVICE_ID } from './events.js';
 export { deliver } from './deliver.js';
 export { parseScenario, loadScenario, playScenario } from './scenario.js';
+export { createRecorder, loadFixtures, matchFixture } from './fixtures.js';

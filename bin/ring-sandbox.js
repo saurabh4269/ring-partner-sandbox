@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// ring-partner-sandbox CLI: serve | fire | play
+// ring-partner-sandbox CLI: serve | record | fire | play
 import { parseArgs } from 'node:util';
 import { createSandbox, DEFAULTS } from '../src/server.js';
 import { buildEvent, EVENT_TYPES, DEFAULT_DEVICE_ID, DEFAULT_ACCOUNT_ID } from '../src/events.js';
 import { deliver } from '../src/deliver.js';
 import { loadScenario, playScenario } from '../src/scenario.js';
+import { createRecorder } from '../src/fixtures.js';
 
 const HELP = `ring-partner-sandbox - local mock of the Ring Partner API + signed webhook simulator
 (unofficial; not affiliated with Ring or Amazon)
@@ -13,7 +14,9 @@ Usage:
   ring-sandbox serve [--port 8686] [--host 127.0.0.1] [--token sandbox-token]
                      [--webhook-url URL] [--signing-key KEY] [--devices N]
                      [--snapshot photo.jpg] [--scenario file.json] [--speed 1]
-                     [--no-waf] [--no-sim-flag] [--no-seed]
+                     [--fixtures dir/] [--no-waf] [--no-sim-flag] [--no-seed]
+  ring-sandbox record [--upstream https://api.amazonvision.com] [--port 8687]
+                     [--host 127.0.0.1] [--out fixtures/] [--no-redact]
   ring-sandbox fire <type> [--sub-type human|vehicle|motion|other_motion|animal|paid|trial]
                      [--url URL] [--signing-key KEY] [--device ID] [--account ID]
                      [--via http://localhost:8686] [--no-sim-flag] [--print]
@@ -23,6 +26,9 @@ Usage:
 Event types: ${EVENT_TYPES.join(', ')}
 
 Environment: RING_WEBHOOK_URL, RING_WEBHOOK_SECRET (signing key), RING_SANDBOX_TOKEN, PORT
+record proxies requests to the real API, returns responses unchanged and saves them as
+fixtures; 'serve --fixtures dir/' replays them (falling back to the mock). Bearer tokens and
+signed-URL tokens are never written to disk; --no-redact keeps account ids and e-mails.
 --via sends the event through a running 'serve' so mock history and webhooks agree.`;
 
 const argv = process.argv.slice(2);
@@ -32,6 +38,8 @@ const neg = (flag) => { const i = rest.indexOf(flag); if (i >= 0) { rest.splice(
 const noWaf = neg('--no-waf');
 const noSim = neg('--no-sim-flag');
 const noSeed = neg('--no-seed');
+const noRedact = neg('--no-redact');
+neg('--redact'); // default; accepted for explicitness
 
 const env = process.env;
 const common = {
@@ -79,6 +87,7 @@ async function main() {
         devices: { type: 'string', default: '1' },
         snapshot: { type: 'string' },
         scenario: { type: 'string' },
+        fixtures: { type: 'string' },
       },
     });
     if (v.help) return console.log(HELP);
@@ -92,6 +101,7 @@ async function main() {
       simFlag: !noSim,
       seedHistory: !noSeed,
       accountId: v.account,
+      fixtures: v.fixtures,
       log: (m) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${m}`),
     });
     const url = await sb.listen(Number(v.port), v.host);
@@ -100,6 +110,7 @@ async function main() {
     console.log(`  WAF headers:  ${noWaf ? 'not required (--no-waf)' : 'User-Agent + Hardware_Id required (406 otherwise)'}`);
     console.log(`  devices:      ${sb.state.devices.map((d) => d.id).join(', ')}`);
     console.log(`  webhooks:     ${sb.options.webhookUrl ? `${sb.options.webhookUrl} (X-Signature HMAC-SHA256)` : 'off (pass --webhook-url)'}`);
+    if (v.fixtures) console.log(`  fixtures:     ${sb.state.fixtures} recorded responses from ${v.fixtures} (mock answers the rest)`);
     console.log(`  point your app at it: RING_API_BASE=${url} RING_ACCESS_TOKEN=${v.token}`);
     if (v.scenario) {
       const steps = await loadScenario(v.scenario);
@@ -109,6 +120,35 @@ async function main() {
         .catch((e) => console.error('  scenario error:', e.message));
     }
     const stop = () => sb.close().then(() => process.exit(0));
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
+    return;
+  }
+
+  if (cmd === 'record') {
+    const { values: v } = parseArgs({
+      args: rest,
+      options: {
+        upstream: { type: 'string', default: env.RING_UPSTREAM || 'https://api.amazonvision.com' },
+        port: { type: 'string', default: '8687' },
+        host: { type: 'string', default: DEFAULTS.host },
+        out: { type: 'string', default: 'fixtures' },
+        help: { type: 'boolean', short: 'h' },
+      },
+    });
+    if (v.help) return console.log(HELP);
+    const rec = createRecorder({
+      upstream: v.upstream,
+      out: v.out,
+      redact: !noRedact,
+      log: (m) => console.log(`[${new Date().toISOString().slice(11, 19)}] ${m}`),
+    });
+    const url = await rec.listen(Number(v.port), v.host);
+    console.log(`ring-sandbox record: proxying ${url} -> ${v.upstream}`);
+    console.log(`  saving fixtures to ${v.out}/  (Authorization never saved; tokens redacted${noRedact ? '' : '; account ids + e-mails redacted'})`);
+    console.log(`  point your app at it: RING_API_BASE=${url} RING_ACCESS_TOKEN=<your Playground token>`);
+    console.log(`  then replay forever:  ring-sandbox serve --fixtures ${v.out}`);
+    const stop = () => rec.close().then(() => { console.log(`  recorded ${rec.recorded.length} responses`); process.exit(0); });
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
     return;

@@ -7,6 +7,7 @@ import { buildEvent, historyTypeFor, DEFAULT_ACCOUNT_ID, MOTION_SUB_TYPES } from
 import { deliver } from './deliver.js';
 import { placeholderJpeg, placeholderPng } from './image.js';
 import { readRawBody } from './verify.js';
+import { loadFixtures, matchFixture } from './fixtures.js';
 
 const PAGE_SIZE = 20;
 const DOWNLOAD_TTL_MS = 60_000;
@@ -161,6 +162,9 @@ export function createSandbox(opts = {}) {
   if (o.seedHistory) seed(state);
   let snapshotFile = null;
   const log = o.log || (() => {});
+  // Recorded responses (see `ring-sandbox record`) take precedence over the mock when they match.
+  const fixtures = o.fixtures ? (o.fixtures instanceof Map ? o.fixtures : loadFixtures(o.fixtures)) : null;
+  state.fixtures = fixtures ? new Set([...fixtures.values()]).size : 0;
 
   const visible = () => state.devices.filter((d) => !d.removed);
   const findDevice = (id) => visible().find((d) => d.id === id);
@@ -219,6 +223,9 @@ export function createSandbox(opts = {}) {
     const auth = req.headers.authorization || '';
     if (auth !== `Bearer ${o.token}`) return apiError(res, 401, 'UNAUTHORIZED', 'Authentication credentials are missing or invalid');
 
+    const fx = fixtures && matchFixture(fixtures, method, path, url.searchParams);
+    if (fx && replay(req, res, fx)) return;
+
     if (method === 'GET' && path === '/v1/users/me') {
       return send(res, 200, { data: { type: 'users', id: o.accountId, attributes: { first_name: 'Sandy', last_name: 'Box', email: 'sandbox@example.com' } } });
     }
@@ -271,6 +278,35 @@ export function createSandbox(opts = {}) {
     }
 
     return apiError(res, 404, 'NOT_FOUND', `No sandbox route for ${method} ${path}`);
+  }
+
+  /** Serve a recorded fixture. Returns false if it can't be replayed (caller falls back to the mock). */
+  function replay(req, res, fx) {
+    const r = fx.response;
+    res.setHeader('X-Sandbox-Fixture', fx.file);
+    if (r.status >= 300 && r.status < 400) {
+      if (!r.image?.bytes) return false; // redirect recorded without its media: use the mock flow
+      const token = randomBytes(24).toString('base64url');
+      const reqId = res.requestId;
+      const h = r.image.headers || {};
+      state.downloads.set(token, {
+        reqId, expires: Date.now() + DOWNLOAD_TTL_MS, bytes: r.image.bytes,
+        contentType: h['content-type'] || (/\.png$/i.test(r.image.file) ? 'image/png' : 'image/jpeg'),
+        ts: h['x-media-timestamp'], origin: h['x-media-origin'],
+      });
+      const loc = `http://${req.headers.host}/v1/download?security_token=${token}&req_type=image_download&req_id=${reqId}`;
+      res.writeHead(r.status, { Location: loc, 'X-Request-ID': reqId, 'Content-Length': '0' });
+      res.end();
+      return true;
+    }
+    const headers = { 'X-Request-ID': res.requestId };
+    for (const [k, v] of Object.entries(r.headers || {})) if (k !== 'location') headers[k] = v;
+    const data = r.body !== undefined ? JSON.stringify(r.body) : (r.text ?? '');
+    headers['content-type'] ??= r.body !== undefined ? 'application/vnd.api+json' : 'text/plain';
+    res.writeHead(r.status, headers);
+    res.end(data);
+    log(`${req.method} ${req.url} -> ${r.status} (fixture ${fx.file})`);
+    return true;
   }
 
   async function imageRequest(req, res, id, url) {
@@ -327,6 +363,13 @@ export function createSandbox(opts = {}) {
     if (!entry || entry.expires < Date.now() || url.searchParams.get('req_id') !== entry.reqId) {
       return apiError(res, 403, 'REQUEST_FORBIDDEN', 'Download link is invalid or expired');
     }
+    if (entry.bytes) {
+      const h = { 'Content-Type': entry.contentType, 'Content-Length': entry.bytes.length, 'X-Request-ID': entry.reqId };
+      if (entry.ts) h['X-Media-Timestamp'] = String(entry.ts);
+      if (entry.origin) h['X-Media-Origin'] = entry.origin;
+      res.writeHead(200, h);
+      return res.end(entry.bytes);
+    }
     let bytes;
     let type = entry.format === 'png' ? 'image/png' : 'image/jpeg';
     if (o.snapshot) {
@@ -349,6 +392,7 @@ export function createSandbox(opts = {}) {
         waf: o.waf,
         devices: state.devices,
         history_count: state.history.length,
+        fixtures: state.fixtures,
         deliveries: state.deliveries.slice(-50),
       });
     }
