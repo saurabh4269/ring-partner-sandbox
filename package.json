@@ -1,6 +1,6 @@
 {
   "name": "ring-partner-sandbox",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Unofficial local mock of the Ring Partner API (api.amazonvision.com, JSON:API), HMAC-signed webhook simulator, and record/replay proxy for real API sessions. Zero dependencies.",
   "type": "module",
   "bin": {

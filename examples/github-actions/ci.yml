@@ -17,7 +17,7 @@ jobs:
 
       - name: Start Ring Partner API sandbox
         id: ring
-        uses: saurabh4269/ring-partner-sandbox@v0.2.0
+        uses: saurabh4269/ring-partner-sandbox@v0.2.1
         with:
           port: 8686
           token: sandbox-token

@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-10-23
+
+### Added
+- `ci/ci.yml`: ready-to-use GitHub Actions workflow (`npm test` on Node 20 and 22, plus a smoke test of the repo's own composite action against `GET /v1/devices`). `scripts/enable-ci.sh` installs it as `.github/workflows/ci.yml`.
+- README: API coverage table listing every documented endpoint with its fidelity (full, approximate, not mocked), plus Tests and CI sections.
+- CONTRIBUTING.md: dev setup, tests, style, how to add an endpoint, how fidelity is checked against the docs.
+
+### Changed
+- Quick start runs `npm test` first and stops its background servers at the end.
+- `.gitignore` covers the `snapshot.jpg` / `snap.jpg` files the quick start writes.
+
 ## [0.2.0] - 2026-10-23
 
 ### Added
@@ -23,5 +34,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - HMAC-SHA256 signed webhook simulator for all 10 v1.1 event types; `fire` and timed `play` scenarios; `--via` to keep history and webhooks consistent.
 - Verifier library for JS (`verifySignature`, `ringWebhookMiddleware`, `idempotency`) and Python (`python/verify.py`).
 
+[0.2.1]: https://github.com/saurabh4269/ring-partner-sandbox/releases/tag/v0.2.1
 [0.2.0]: https://github.com/saurabh4269/ring-partner-sandbox/releases/tag/v0.2.0
 [0.1.0]: https://github.com/saurabh4269/ring-partner-sandbox/tree/7542520
