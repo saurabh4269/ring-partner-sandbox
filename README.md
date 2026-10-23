@@ -1,13 +1,30 @@
 # ring-partner-sandbox
 
-A local mock of the **Ring Partner API** (`https://api.amazonvision.com`, JSON:API) plus a **signed webhook simulator**, so you can build and test a Ring integration without a live token and run your webhook handler against realistic events.
-
-- Zero runtime dependencies. Node.js 20 or newer, ESM. Nothing to install.
-- Response shapes, headers, error envelopes and webhook payloads follow the public Ring Partner API docs.
-- Webhooks are signed exactly as the docs describe (`X-Signature: sha256=<hex HMAC-SHA256 of the raw body>`).
-- Includes a verifier library (JS and Python) and Node `http`/Express middleware.
+A local, zero-dependency stand-in for the **Ring Partner API** (`https://api.amazonvision.com`, JSON:API) with a **signed webhook simulator** and a **record/replay proxy**. Build and test a Ring integration without waiting on a 30-minute Playground token: develop against realistic mock data, fire every documented webhook at your handler with a valid `X-Signature`, capture a real Playground session once and replay it forever, and run all of it in CI with a one-line GitHub Action.
 
 > **Unofficial.** This project is not affiliated with, endorsed by or supported by Ring LLC or Amazon. Endpoint shapes are derived from the public [Ring Partner API documentation](https://developer.amazon.com/docs/ring/api-documentation.html). The real API can differ from this mock. Before you ship, test against the real service.
+
+## Features
+
+- **Mock API** for users, devices (with JSON:API `include`), status, capabilities, configurations, location, event history with filters and pagination, and the snapshot `POST` → `303` → signed download flow. It enforces the same rules as Ring (Bearer 401, `User-Agent`/`Hardware_Id` 406, documented error envelopes), so mistakes surface locally.
+- **Webhook simulator** for all 10 documented v1.1 event types, HMAC-SHA256 signed exactly as documented. Fire them one at a time or as timed scenarios. Events also land in mock history and change device state.
+- **Record / replay**: a transparent proxy that saves real API responses (and snapshot images) as redacted fixtures, then `serve --fixtures` replays them. [Details](#record-and-replay-real-responses)
+- **GitHub Action**: `uses: saurabh4269/ring-partner-sandbox@v0.2.0` gives your CI a running sandbox and its `base-url`. [Details](#github-action)
+- **Verifiers** for JS (`verifySignature`, node:http/Express middleware with idempotency) and Python (stdlib only).
+- **Runnable examples** for a Node client and Node/Python webhook receivers, all covered by the test suite.
+- Node.js 20 or newer, ESM, no runtime dependencies, nothing to install.
+
+## 60-second quick start
+
+```bash
+git clone https://github.com/saurabh4269/ring-partner-sandbox && cd ring-partner-sandbox
+node examples/webhook-receiver.mjs &                                          # a signed-webhook receiver on :3000
+node bin/ring-sandbox.js serve --webhook-url http://localhost:3000/webhooks/ring &   # the mock API on :8686
+node examples/node-client.mjs                                                 # devices, history, snapshot.jpg
+node bin/ring-sandbox.js play scenarios/porch-delivery.json --via http://localhost:8686 --speed 10
+```
+
+The client prints your devices and recent events and saves `snapshot.jpg`. The receiver logs each verified event as the scenario plays (vehicle, person, doorbell press).
 
 ## Why
 
@@ -20,11 +37,9 @@ The Ring Developer Playground is the official way to try the Partner API, but it
 | There's **no SDK**, so you have to get the headers, 303 redirect, JSON:API envelopes and WAF quirks right by hand | A server that enforces the same rules (Bearer, `User-Agent`/`Hardware_Id` 406, 303 snapshot flow) so mistakes surface locally |
 | Webhooks and history are unrelated in ad-hoc mocks | Events fired through `serve` go into mock history **and** out as webhooks, so `/v1/history` matches what your handler received |
 
-## Quick start
+## Quick start with curl
 
 ```bash
-git clone https://github.com/saurabh4269/ring-partner-sandbox
-cd ring-partner-sandbox
 node bin/ring-sandbox.js serve --webhook-url http://localhost:3000/webhooks/ring
 ```
 
@@ -129,17 +144,17 @@ Events also update mock state. `device_offline` and `device_online` toggle `stat
 
 ## Record and replay real responses
 
-Playground tokens last about 30 minutes. Spend them recording, then develop against the recording forever:
+Playground tokens last about 30 minutes. Spend them recording, then develop against the recording forever. (Commands assume `npm i -g github:saurabh4269/ring-partner-sandbox`; otherwise use `node bin/ring-sandbox.js`.)
 
 ```bash
 # 1. Start a recording proxy in front of the real API
-npx ring-sandbox record --upstream https://api.amazonvision.com --port 8687 --out fixtures/
+ring-sandbox record --upstream https://api.amazonvision.com --port 8687 --out fixtures/
 
 # 2. Point your app (or curl) at the proxy with your real Playground token and click around
 RING_API_BASE=http://localhost:8687 RING_ACCESS_TOKEN=<playground token> npm start
 
 # 3. Later, offline, with the never-expiring sandbox token
-npx ring-sandbox serve --fixtures fixtures/
+ring-sandbox serve --fixtures fixtures/
 RING_API_BASE=http://localhost:8686 RING_ACCESS_TOKEN=sandbox-token npm start
 ```
 
@@ -191,6 +206,30 @@ jobs:
 
 Outputs: `base-url`, `token`, `log-file`. The server PID is exported as `$RING_SANDBOX_PID`. A complete workflow is in [`examples/github-actions/ci.yml`](examples/github-actions/ci.yml).
 
+## Examples
+
+| File | What it shows |
+|---|---|
+| [`examples/node-client.mjs`](examples/node-client.mjs) | A dependency-free client: required WAF headers, `include=status` and resolving `included`, history filters, and the snapshot 303 flow without leaking the bearer token to the signed URL. Respects `RING_API_BASE` / `RING_ACCESS_TOKEN`, so it also works against the real API or a recording proxy. |
+| [`examples/webhook-receiver.mjs`](examples/webhook-receiver.mjs) | A `node:http` receiver using `ringWebhookMiddleware`: signature check, duplicate `request_id` handling, fast acknowledgement. The same middleware works in Express. |
+| [`examples/python-webhook.py`](examples/python-webhook.py) | The same receiver in Python using only `http.server` and [`python/verify.py`](python/verify.py). Listens on `:3001`. |
+| [`examples/github-actions/ci.yml`](examples/github-actions/ci.yml) | A complete CI workflow using the action. |
+
+`npm test` runs each example against a live sandbox, so they stay working.
+
+## Use with DropZone+
+
+[DropZone+](https://github.com/saurabh4269/dropzone-plus) is a Ring integration that reads `RING_API_BASE`, so it runs end to end against the sandbox:
+
+```bash
+# terminal 1
+node bin/ring-sandbox.js serve --webhook-url http://localhost:3000/webhooks/ring
+# terminal 2, in a clone of github.com/saurabh4269/dropzone-plus
+RING_API_BASE=http://localhost:8686 RING_ACCESS_TOKEN=sandbox-token npm start
+```
+
+Any integration can do the same: make the API base URL configurable and point it at the sandbox (or at `serve --fixtures` with a recorded session).
+
 ## Verifying webhooks in your app
 
 ```js
@@ -223,6 +262,7 @@ With Express, don't put `express.json()` in front of this route, because it cons
 | Errors | Documented envelope: `{"errors":[{"id","status","code","detail","source":{"pointer"},"meta":{"timestamp"}}]}`, with codes such as `INVALID_PAYLOAD`, `UNAUTHORIZED`, `REQUEST_FORBIDDEN`, `DEVICE_NOT_FOUND` and `MEDIA_NOT_FOUND` |
 | Webhooks v1.1 | Matches: `meta.version`/`time`/`request_id`/`account_id`, per-type `data` shapes (device, `users`-sourced app integration, and subscription events with `source_id`/`plan_id`/`expires_at`), and the `X-Signature` HMAC-SHA256 over the raw body. Non-standard: `meta.simulated: true` (`--no-sim-flag` removes it). `timestamp_readable` is in UTC. |
 | Webhook retries and backoff (1s, 5s, 30s, …) and the 5-second timeout | Partial: one attempt with a 5-second timeout, and the result is recorded in `/_sandbox/state`. No retries. |
+| Record / replay | Recorded responses are byte-for-byte JSON from the real API (after redaction). Approximated: matching ignores request bodies, so two different `POST` bodies to one path share a fixture (the last one recorded wins); replayed snapshot links are issued by the sandbox. |
 | **Not mocked** | WHEP live streaming and video clip download (both return 501 `NOT_IMPLEMENTED`), OAuth (`oauth.ring.com` token exchange and refresh), account linking and `app-integrations`, the Subscriptions query API, chimes and other non-camera devices, multi-camera `components`, rate limiting |
 
 Found a mismatch with the docs or the real API? Please open an issue with the docs section or a redacted real response.
@@ -233,8 +273,8 @@ Found a mismatch with the docs or the real API? Please open an issue with the do
 npm test     # node --test, no dependencies
 ```
 
-The code is in `src/`: `server.js` (mock API), `events.js` (payload builders), `verify.js` (signatures, middleware, idempotency), `deliver.js`, `scenario.js` and `image.js`.
+The code is in `src/`: `server.js` (mock API), `fixtures.js` (record proxy and replay), `events.js` (payload builders), `verify.js` (signatures, middleware, idempotency), `deliver.js`, `scenario.js` and `image.js`. The tests start real servers on random ports (including the sandbox as a fake upstream for the recorder), so no real Ring calls are made. See [CHANGELOG.md](CHANGELOG.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## License
+## License and disclaimer
 
-MIT. See [LICENSE](LICENSE). Ring and Amazon are trademarks of their respective owners. They're mentioned here only to describe compatibility.
+This is an unofficial community project, not affiliated with, endorsed by or supported by Ring LLC or Amazon. MIT. See [LICENSE](LICENSE). Ring and Amazon are trademarks of their respective owners. They're mentioned here only to describe compatibility.
